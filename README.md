@@ -1,5 +1,7 @@
 # 🔥 Llar - Large Language Assistant Resident
 
+[!Demo](app/src/main/res/raw/llar_blowing.mp4)
+
 **Llar** es un asistente personal inteligente, privado y modular para Android. Inspirado en el concepto asturiano del *llar* (el hogar, el fuego que protege y reúne a la familia), Llar te acompaña, te entiende y te ayuda — sin enviar nada a la nube.
 
 ---
