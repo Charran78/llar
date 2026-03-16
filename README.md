@@ -1,6 +1,6 @@
 # 🔥 Llar - Large Language Assistant Resident
 
-[Demo](app/src/main/res/raw/llar_blowing.mp4)
+![Demo](app/src/main/res/raw/llar_blowing.mp4)
 
 **Llar** es un asistente personal inteligente, privado y modular para Android. Inspirado en el concepto asturiano del *llar* (el hogar, el fuego que protege y reúne a la familia), Llar te acompaña, te entiende y te ayuda — sin enviar nada a la nube.
 
@@ -172,6 +172,24 @@ app/src/main/
 │       ├── llar_wait.mp4
 │       └── llar_wait2.mp4
 ```
+<div align="center">
+
+      
+<br />
+
+<p align="center">
+  <a href="https://pedromencias.netlify.app/">
+    <img align="center" src="https://i.postimg.cc/GmX5PCN5/PF-ok2.png" width="256" alt="Portfolio" /> 
+  </a>
+  <a href="https://www.linkedin.com/in/pedro-menc%C3%ADas-68223336b/">
+    <img align="center" src="https://i.postimg.cc/9MjsxpmM/LI-Logo.png" width="256" alt="LinkedIn" /> 
+  </a>
+  <a href="https://www.buymeacoffee.com/beyonddigiv">
+    <img align="center" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" width="256" alt="beyonddigiv" /> 
+  </a>
+</p>
+
+<br/>
 
 ---
 
