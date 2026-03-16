@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Llar</string>
+    <string name="picovoice_access_key">tu_access_key_aqui</string>
+</resources>
