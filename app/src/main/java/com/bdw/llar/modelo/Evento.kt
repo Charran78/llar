@@ -9,5 +9,5 @@ package com.bdw.llar.modelo
 data class Evento(
     val tipo: String,
     val origen: String,
-    val datos: Map<String, Any> = emptyMap()
+    val datos: Map<String, Any?> = emptyMap()
 )

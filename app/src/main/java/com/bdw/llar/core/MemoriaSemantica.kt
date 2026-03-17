@@ -40,7 +40,8 @@ class MemoriaSemantica : BusEventos.Suscriptor {
             "memoria.buscar_contexto" -> {
                 val texto = evento.datos["texto"] as? String ?: return
                 val sesionId = evento.datos["sesion_id"] as? String ?: "default"
-                scope.launch { generarVectorParaBusqueda(texto, sesionId) }
+                val requestId = evento.datos["request_id"] as? String
+                scope.launch { generarVectorParaBusqueda(texto, sesionId, requestId) }
             }
         }
     }
@@ -83,7 +84,7 @@ class MemoriaSemantica : BusEventos.Suscriptor {
         }
     }
 
-    private fun generarVectorParaBusqueda(texto: String, sesionId: String) {
+    private fun generarVectorParaBusqueda(texto: String, sesionId: String, requestId: String?) {
         val requestBody = JSONObject().apply {
             put("model", modelName)
             put("prompt", texto)
@@ -108,18 +109,19 @@ class MemoriaSemantica : BusEventos.Suscriptor {
                         datos = mapOf(
                             "vector" to embedding.toString(),
                             "limite" to 3,
-                            "sesion_id" to sesionId
+                            "sesion_id" to sesionId,
+                            "request_id" to requestId
                         )
                     ))
                 }
             } else {
                 Log.e(TAG, "Error buscando contexto semántico: ${response.code}")
                 // Fallback: Si falla la semántica, continuar de todos modos sin contexto
-                BusEventos.publicar(Evento("memoria.recuerdos_recuperados", "memoria_semantica", mapOf("recuerdos" to emptyList<String>(), "sesion_id" to sesionId)))
+                BusEventos.publicar(Evento("memoria.recuerdos_recuperados", "memoria_semantica", mapOf("recuerdos" to emptyList<String>(), "sesion_id" to sesionId, "request_id" to requestId)))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error MemoriaSemantica (busqueda): ${e.message}")
-            BusEventos.publicar(Evento("memoria.recuerdos_recuperados", "memoria_semantica", mapOf("recuerdos" to emptyList<String>(), "sesion_id" to sesionId)))
+            BusEventos.publicar(Evento("memoria.recuerdos_recuperados", "memoria_semantica", mapOf("recuerdos" to emptyList<String>(), "sesion_id" to sesionId, "request_id" to requestId)))
         }
     }
 

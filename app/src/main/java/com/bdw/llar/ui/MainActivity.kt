@@ -41,6 +41,7 @@ import com.bdw.llar.efectores.Avatar
 import com.bdw.llar.efectores.LLMRemoto
 import com.bdw.llar.efectores.Voz
 import com.bdw.llar.efectores.CalendarioAndroid
+import com.bdw.llar.efectores.DispositivoAndroid
 import com.bdw.llar.modelo.Evento
 import com.bdw.llar.sentidos.Oido
 import com.bdw.llar.sentidos.WakeWordDetector
@@ -58,6 +59,7 @@ class MainActivity : ComponentActivity() {
     private var avatar: Avatar? = null
     private var voz: Voz? = null
     private var calendarioAndroid: CalendarioAndroid? = null
+    private var dispositivoAndroid: DispositivoAndroid? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -67,7 +69,8 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.READ_CALENDAR,
             Manifest.permission.WRITE_CALENDAR,
             Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.CAMERA // Necesario para la linterna
         )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -102,11 +105,8 @@ class MainActivity : ComponentActivity() {
                             BusEventos.publicar(Evento("oido.activar_modo_escucha", "ui", mapOf("duracion" to 7)))
                         },
                         onUserChange = { nuevoUsuario ->
-                            // Guardar en BD para persistencia
                             BusEventos.publicar(Evento("memoria.guardar", "ui", mapOf("clave" to "usuario_activo", "valor" to nuevoUsuario)))
                             BusEventos.publicar(Evento("memoria.guardar", "ui", mapOf("clave" to "nombre_usuario", "valor" to nuevoUsuario)))
-                            
-                            // Avisar proactivamente a Cerebro para cambiar el scope de sesión
                             BusEventos.publicar(Evento("usuario.cambiado", "ui", mapOf("nuevo_usuario" to nuevoUsuario)))
                             BusEventos.publicar(Evento("voz.hablar", "ui", mapOf("texto" to "Hola $nuevoUsuario.")))
                         },
@@ -127,7 +127,8 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.READ_CALENDAR,
             Manifest.permission.WRITE_CALENDAR,
             Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.CAMERA
         )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -150,6 +151,7 @@ class MainActivity : ComponentActivity() {
             if (llmRemoto == null) llmRemoto = LLMRemoto()
             if (voz == null) voz = Voz(this)
             if (calendarioAndroid == null) calendarioAndroid = CalendarioAndroid(this)
+            if (dispositivoAndroid == null) dispositivoAndroid = DispositivoAndroid(this)
             if (oido == null) oido = Oido(this)
             if (wakeWordDetector == null) {
                 wakeWordDetector = WakeWordDetector(this)
@@ -192,7 +194,6 @@ fun LlarScreen(
     onCompactClick: () -> Unit
 ) {
     var ultimoEvento by remember { mutableStateOf("LISTO") }
-    var showShoppingList by remember { mutableStateOf(false) }
     var itemsLista by remember { mutableStateOf<List<String>>(emptyList()) }
     var expandedUserMenu by remember { mutableStateOf(false) }
     var amplitudVoz by remember { mutableFloatStateOf(0f) }
@@ -201,7 +202,6 @@ fun LlarScreen(
     val usuarios = listOf("Pedro", "Rebeca", "Sergio")
     var usuarioSeleccionado by remember { mutableStateOf(usuarios[0]) }
 
-    // ANIMACIÓN DE PULSACIÓN DEL FUEGO
     val infiniteTransition = rememberInfiniteTransition(label = "fuego")
     val fireAlpha by infiniteTransition.animateFloat(
         initialValue = 0.3f,
@@ -249,13 +249,6 @@ fun LlarScreen(
                         }) {
                             Icon(Icons.Filled.Mic, contentDescription = "Hablar", tint = Color(0xFFFF8C00))
                         }
-                        IconButton(onClick = { 
-                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                            BusEventos.publicar(Evento("lista.consultar", "ui"))
-                            showShoppingList = true 
-                        }) {
-                            Icon(Icons.Filled.ShoppingCart, contentDescription = "Lista", tint = Color(0xFFFF8C00))
-                        }
                     }
                 },
                 title = {
@@ -300,27 +293,14 @@ fun LlarScreen(
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding).background(Color(0xFF0A0A0A))) {
-            
-            // AURA DE FUEGO PULSANTE
             Box(modifier = Modifier.fillMaxWidth().height(200.dp).background(fireGradient))
-
             Column(modifier = Modifier.fillMaxSize()) {
-
-                // ── MITAD SUPERIOR: info + visualizador ──
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)  // FIX #4: mitad superior ocupa el espacio restante
-                        .padding(24.dp),
+                    modifier = Modifier.fillMaxWidth().weight(1f).padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Text(
-                        "CONEXIÓN: $usuarioSeleccionado",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFFFF8C00).copy(alpha = 0.6f),
-                        fontWeight = FontWeight.Medium
-                    )
+                    Text("CONEXIÓN: $usuarioSeleccionado", style = MaterialTheme.typography.labelMedium, color = Color(0xFFFF8C00).copy(alpha = 0.6f))
                     Spacer(modifier = Modifier.height(16.dp))
                     VisualizadorEspectro(amplitud = amplitudVoz)
                     Spacer(modifier = Modifier.height(12.dp))
@@ -329,100 +309,14 @@ fun LlarScreen(
                         shape = RoundedCornerShape(20.dp),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF4500).copy(alpha = 0.15f))
                     ) {
-                        Text(
-                            ultimoEvento,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                            color = Color(0xFFFF4500),
-                            letterSpacing = 2.sp
-                        )
+                        Text(ultimoEvento, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp), color = Color(0xFFFF4500), letterSpacing = 2.sp)
                     }
                 }
-
-                // ── MITAD INFERIOR: Avatar (50% fijo) ──
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.5f)  // FIX #4: exactamente la mitad inferior de la pantalla
-                        .clip(RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp))
-                        .background(Color.Black.copy(alpha = 0.25f))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            val emocionesInteractivas = listOf("carino", "soplar", "alegre")
-                            BusEventos.publicar(Evento("avatar.expresar", "ui", mapOf("emocion" to emocionesInteractivas.random())))
-                        }
-                ) {
+                Box(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.5f).clip(RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp)).background(Color.Black.copy(alpha = 0.25f))) {
                     AndroidView(
-                        factory = { ctx ->
-                            FrameLayout(ctx).apply {
-                                layoutParams = FrameLayout.LayoutParams(
-                                    FrameLayout.LayoutParams.MATCH_PARENT,
-                                    FrameLayout.LayoutParams.MATCH_PARENT
-                                )
-                                post { onAvatarContainerReady(this) }
-                            }
-                        },
+                        factory = { ctx -> FrameLayout(ctx).apply { post { onAvatarContainerReady(this) } } },
                         modifier = Modifier.fillMaxSize()
                     )
-                }
-            }
-
-            // SIDE PANEL PARA LISTA
-            AnimatedVisibility(
-                visible = showShoppingList,
-                enter = slideInHorizontally(initialOffsetX = { it }),
-                exit = slideOutHorizontally(targetOffsetX = { it }),
-                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().fillMaxWidth(0.92f)
-            ) {
-                Surface(
-                    tonalElevation = 20.dp,
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFF050505).copy(alpha = 0.98f),
-                    shape = RoundedCornerShape(topStart = 40.dp, bottomStart = 40.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF4500).copy(alpha = 0.1f))
-                ) {
-                    Column(modifier = Modifier.padding(32.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("HOGAR", style = MaterialTheme.typography.titleLarge, color = Color(0xFFFF4500), fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-                            Spacer(Modifier.weight(1f))
-                            IconButton(onClick = { showShoppingList = false }) {
-                                Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = Color.DarkGray)
-                            }
-                        }
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp), color = Color(0xFFFF4500).copy(alpha = 0.15f))
-                        LazyColumn(modifier = Modifier.weight(1f)) {
-                            items(itemsLista) { item ->
-                                ListItem(
-                                    headlineContent = { Text(item, color = Color.White.copy(alpha = 0.9f), fontWeight = FontWeight.Medium) },
-                                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                                    trailingContent = {
-                                        IconButton(onClick = {
-                                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                                            BusEventos.publicar(Evento("voz.hablar", "ui", mapOf("texto" to "He quitado $item de la lista")))
-                                        }) {
-                                            Icon(Icons.Default.Delete, contentDescription = "Borrar", tint = Color(0xFF911F1F))
-                                        }
-                                    }
-                                )
-                            }
-                        }
-                        Button(
-                            onClick = { 
-                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                BusEventos.publicar(Evento("lista.limpiar", "ui")) 
-                            },
-                            modifier = Modifier.fillMaxWidth().height(68.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7A1313)),
-                            shape = RoundedCornerShape(24.dp)
-                        ) {
-                            Icon(Icons.Default.DeleteSweep, contentDescription = null)
-                            Spacer(Modifier.width(12.dp))
-                            Text("VACIAR TODO", fontWeight = FontWeight.Black)
-                        }
-                    }
                 }
             }
         }
@@ -432,31 +326,16 @@ fun LlarScreen(
 @Composable
 fun VisualizadorEspectro(amplitud: Float) {
     val barCount = 12
-    val animAmplitud by animateFloatAsState(
-        targetValue = amplitud,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-        label = "anim_amplitud"
-    )
-
-    Row(
-        modifier = Modifier.height(40.dp).fillMaxWidth(0.6f),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    val animAmplitud by animateFloatAsState(targetValue = amplitud, label = "anim_amplitud")
+    Row(modifier = Modifier.height(40.dp).fillMaxWidth(0.6f), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
         repeat(barCount) {
             val heightFactor = (animAmplitud * (0.6f + Random.nextFloat() * 0.4f)).coerceIn(0.1f, 1f)
-            
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .fillMaxHeight(heightFactor)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color(0xFFFF4500), Color(0xFFFF8C00))
-                        )
-                    )
-            )
+            Box(modifier = Modifier.width(4.dp).fillMaxHeight(heightFactor).clip(RoundedCornerShape(2.dp)).background(Brush.verticalGradient(listOf(Color(0xFFFF4500), Color(0xFFFF8C00)))))
         }
     }
+}
+
+@Composable
+fun LlarTheme(content: @Composable () -> Unit) {
+    MaterialTheme(typography = Typography(), content = content)
 }

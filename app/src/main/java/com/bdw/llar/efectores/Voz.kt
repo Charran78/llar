@@ -12,7 +12,7 @@ import java.util.Locale
 
 /**
  * El Efector de Voz utiliza el motor de TextToSpeech de Android.
- * Notifica al sistema cuando empieza y termina de hablar para sincronizar el avatar.
+ * v2.1: Limpieza de asteriscos para evitar locución de símbolos.
  */
 class Voz(context: Context) : BusEventos.Suscriptor, TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
@@ -39,13 +39,11 @@ class Voz(context: Context) : BusEventos.Suscriptor, TextToSpeech.OnInitListener
                     BusEventos.publicar(Evento("voz.finalizado", "voz"))
                 }
 
-                @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
                     BusEventos.publicar(Evento("voz.finalizado", "voz"))
                 }
             })
 
-            // Intentar voz femenina
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 val voices = tts?.voices
                 val femaleVoice = voices?.find { 
@@ -54,8 +52,8 @@ class Voz(context: Context) : BusEventos.Suscriptor, TextToSpeech.OnInitListener
                 femaleVoice?.let { tts?.voice = it }
             }
 
-            tts?.setPitch(1.05f) // Un poco menos robótico, más natural
-            tts?.setSpeechRate(1.0f) // Velocidad normal para que se entienda mejor
+            tts?.setPitch(1.05f)
+            tts?.setSpeechRate(1.0f)
             isReady = true
         }
     }
@@ -64,18 +62,19 @@ class Voz(context: Context) : BusEventos.Suscriptor, TextToSpeech.OnInitListener
         if (evento.tipo == "voz.hablar") {
             val texto = evento.datos["texto"] as? String
             if (texto != null) {
-                hablar(texto)
+                // LIMPIEZA DE ASTERISCOS: Evita que el TTS diga "asterisco"
+                val textoLimpio = texto.replace("*", "")
+                hablar(textoLimpio)
             }
         }
     }
 
     private fun hablar(texto: String) {
-        if (isReady) {
+        if (isReady && texto.isNotBlank()) {
             val params = Bundle()
             params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "LlarMsg_${System.currentTimeMillis()}")
             
-            // Forzamos el evento voz.empezado incluso antes de que el motor TTS procese,
-            // para asegurar que el Avatar cambie a 'hablar' instantáneamente.
+            // Notificamos inicio
             BusEventos.publicar(Evento("voz.empezado", "voz_previa"))
 
             tts?.speak(texto, TextToSpeech.QUEUE_FLUSH, params, params.getString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID))
@@ -85,7 +84,6 @@ class Voz(context: Context) : BusEventos.Suscriptor, TextToSpeech.OnInitListener
     fun shutdown() {
         tts?.stop()
         tts?.shutdown()
-        BusEventos.desuscribir("voz.hablar", this)
     }
 
     companion object {

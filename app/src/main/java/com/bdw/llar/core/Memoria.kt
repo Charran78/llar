@@ -152,10 +152,12 @@ class Memoria(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null,
             "memoria.obtener_historial" -> {
                 val limite = (evento.datos["limite"] as? Int) ?: 10
                 val sesionId = evento.datos["sesion_id"] as? String
+                val requestId = evento.datos["request_id"] as? String
                 val historial = obtenerHistorial(limite, sesionId)
                 BusEventos.publicar(Evento("memoria.historial_recuperado", "memoria", mapOf(
                     "mensajes" to historial,
-                    "sesion_id" to (sesionId ?: "")
+                    "sesion_id" to (sesionId ?: ""),
+                    "request_id" to requestId
                 )))
             }
             // FIX #8: recuerdos vectoriales ahora se persisten
@@ -169,6 +171,7 @@ class Memoria(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null,
                 val vectorConsultaStr = evento.datos["vector"] as? String ?: return
                 val limite = (evento.datos["limite"] as? Int) ?: 3
                 val sesionId = evento.datos["sesion_id"] as? String ?: "default"
+                val requestId = evento.datos["request_id"] as? String
                 
                 val resultados = buscarRecuerdosSimilares(vectorConsultaStr, limite)
                 BusEventos.publicar(Evento(
@@ -176,7 +179,8 @@ class Memoria(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null,
                     origen = "memoria",
                     datos = mapOf(
                         "recuerdos" to resultados,
-                        "sesion_id" to sesionId
+                        "sesion_id" to sesionId,
+                        "request_id" to requestId
                     )
                 ))
             }
