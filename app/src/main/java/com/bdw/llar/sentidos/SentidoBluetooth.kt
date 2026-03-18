@@ -13,6 +13,7 @@ import com.bdw.llar.modelo.Evento
  * Sentido de Bluetooth.
  * Escucha cuando un dispositivo Bluetooth se conecta o desconecta.
  * Emite eventos para que Llar sea proactiva (ej: leer lista al entrar al coche).
+ * TAG renombrado.
  */
 class SentidoBluetooth(private val context: Context) {
 
@@ -26,7 +27,7 @@ class SentidoBluetooth(private val context: Context) {
 
             when (action) {
                 BluetoothDevice.ACTION_ACL_CONNECTED -> {
-                    Log.i(TAG, "Bluetooth conectado: $deviceName")
+                    Log.i(tag, "Bluetooth conectado: $deviceName")
                     BusEventos.publicar(Evento(
                         tipo = "bluetooth.conectado",
                         origen = "sentido_bluetooth",
@@ -34,7 +35,7 @@ class SentidoBluetooth(private val context: Context) {
                     ))
                 }
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
-                    Log.i(TAG, "Bluetooth desconectado: $deviceName")
+                    Log.i(tag, "Bluetooth desconectado: $deviceName")
                     BusEventos.publicar(Evento(
                         tipo = "bluetooth.desconectado",
                         origen = "sentido_bluetooth",
@@ -51,18 +52,18 @@ class SentidoBluetooth(private val context: Context) {
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
         }
         context.registerReceiver(bluetoothReceiver, filter)
-        Log.i(TAG, "SentidoBluetooth iniciado y escuchando.")
+        Log.i(tag, "SentidoBluetooth iniciado y escuchando.")
     }
 
     fun shutdown() {
         try {
             context.unregisterReceiver(bluetoothReceiver)
         } catch (e: Exception) {
-            Log.e(TAG, "Error al desregistrar receiver de Bluetooth: ${e.message}")
+            Log.e(tag, "Error al desregistrar receiver de Bluetooth: ${e.message}")
         }
     }
 
     companion object {
-        private const val TAG = "SentidoBluetooth"
+        private const val tag = "SentidoBluetooth"
     }
 }

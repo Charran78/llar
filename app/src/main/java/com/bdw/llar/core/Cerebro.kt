@@ -4,12 +4,13 @@ import com.bdw.llar.modelo.Evento
 import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.*
-import android.os.Handler
-import android.os.Looper
+import java.util.concurrent.atomic.AtomicBoolean
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * El Cerebro es el orquestador de Llar.
- * v3.2: Auditoría de permisos proactiva y Copia Defensiva.
+ * v3.8: Logs de depuración mejorados y prioridad de respuesta por canal de origen.
  */
 class Cerebro : BusEventos.Suscriptor {
     private var modoApuntarCompra = false
@@ -20,11 +21,11 @@ class Cerebro : BusEventos.Suscriptor {
     private val MAX_INTERACCIONES_ANTES_COMPACTAR = 8
     var sesionId: String = UUID.randomUUID().toString()
 
-    private var ocupado = false
+    private val ocupado = AtomicBoolean(false)
+    private var esResumenEnCurso = false
     private var ultimoRequestId: String? = null
-    private val timeoutHandler = Handler(Looper.getMainLooper())
-    private val TIMEOUT_MS = 90000L
-
+    private var origenUltimaInteraccion: String = "voz"
+    
     private var pendienteContexto: Boolean = false
     private var pendienteHistorial: Boolean = false
     private var textoParaLLM: String = ""
@@ -49,8 +50,13 @@ class Cerebro : BusEventos.Suscriptor {
 
         when (evento.tipo) {
             "wakeword.detectada"          -> procesarWakeWord()
-            "voz.comando"                 -> procesarComandoVoz(evento)
+            "voz.comando"                 -> {
+                Log.d(TAG, "Comando de voz/texto recibido desde ${evento.origen}: '${evento.datos["texto"]}'")
+                origenUltimaInteraccion = evento.origen // Guardar el origen
+                procesarComandoVoz(evento)
+            }
             "llm.respuesta"               -> procesarRespuestaLLM(evento)
+            "llm.respuesta_herramienta"   -> procesarRespuestaHerramientaLLM(evento)
             "memoria.recuerdos_recuperados" -> procesarContextoRecuperado(evento)
             "memoria.historial_recuperado"-> procesarHistorialRecuperado(evento)
             "herramienta.resultado"       -> procesarResultadoHerramienta(evento)
@@ -58,6 +64,14 @@ class Cerebro : BusEventos.Suscriptor {
             "memoria.respuesta"           -> procesarRespuestaMemoria(evento)
             "lista.compra_actualizada"    -> procesarListaActualizada(evento)
             "memoria.compactar"           -> solicitarCompactacion()
+            "vision.capturar_foto"        -> logicManualCameraTrigger(evento)
+        }
+    }
+
+    private fun logicManualCameraTrigger(evento: Evento) {
+        if (evento.origen == "ui") {
+            Log.i(TAG, "📸 Gatillo manual de cámara detectado desde la UI.")
+            pedirHistorialYEnviarAlLLM("Analiza lo que ves frente a ti.", "ui")
         }
     }
 
@@ -69,12 +83,12 @@ class Cerebro : BusEventos.Suscriptor {
             else      -> "¡Buenas noches!"
         }
         val nombre = nombreUsuario ?: ""
-        responder(if (nombre.isNotBlank()) "$saludoBase $nombre." else saludoBase)
+        responder(if (nombre.isNotBlank()) "$saludoBase $nombre." else saludoBase, "cerebro")
     }
 
     private fun procesarWakeWord() {
         if (modoDescanso) return
-        responder(listOf("¿Sí?", "Dime.", "Te escucho.").random())
+        responder(listOf("¿Sí?", "Dime.", "Te escucho.").random(), "cerebro")
         BusEventos.publicar(Evento("oido.activar_modo_escucha", "cerebro", mapOf("duracion" to 7)))
     }
 
@@ -86,7 +100,7 @@ class Cerebro : BusEventos.Suscriptor {
             if (cmd.contains("despierta") || cmd.contains("levántate")) {
                 modoDescanso = false
                 BusEventos.publicar(Evento("avatar.expresar", "cerebro", mapOf("emocion" to "neutral")))
-                responder("¡Hola! Ya estoy aquí.")
+                responder("¡Hola! Ya estoy aquí.", "cerebro")
             }
             return
         }
@@ -94,10 +108,10 @@ class Cerebro : BusEventos.Suscriptor {
         if (modoApuntarCompra) {
             if (cmd.contains("fin lista") || cmd.contains("terminar")) {
                 modoApuntarCompra = false
-                responder("Hecho, lo he apuntado.")
+                responder("Hecho, lo he apuntado.", "cerebro")
             } else {
                 BusEventos.publicar(Evento("lista.añadir", "cerebro", mapOf("item" to texto)))
-                responder("Apuntado.")
+                responder("Apuntado.", "cerebro")
             }
             return
         }
@@ -106,23 +120,31 @@ class Cerebro : BusEventos.Suscriptor {
             cmd.contains("descansa") || cmd.contains("vete a dormir") || cmd.contains("a dormir") -> {
                 modoDescanso = true
                 BusEventos.publicar(Evento("avatar.expresar", "cerebro", mapOf("emocion" to "dormir")))
-                responder("De acuerdo, voy a descansar.")
+                responder("De acuerdo, voy a descansar.", "cerebro")
             }
-            else -> pedirHistorialYEnviarAlLLM(texto)
+            else -> pedirHistorialYEnviarAlLLM(texto, evento.origen)
         }
     }
 
-    private fun pedirHistorialYEnviarAlLLM(texto: String) {
-        if (ocupado) return
+    private fun pedirHistorialYEnviarAlLLM(texto: String, origen: String) {
+        if (!ocupado.compareAndSet(false, true)) {
+            Log.w(TAG, "Intento de interacción ignorado: Cerebro ocupado.")
+            // Si está ocupado, podemos responder por el canal original que Llar está ocupada.
+            if (origen == "telegram_sentido") {
+                BusEventos.publicar(Evento("telegram.enviar_mensaje", "cerebro", mapOf("mensaje" to "Estoy ocupada ahora mismo, Pedro. Dame un momento.")))
+            }
+            return
+        }
         
-        Log.i(TAG, "🧠 PENSANDO... [Iniciando flujo de respuesta]")
-        BusEventos.publicar(Evento("llm.solicitar", "cerebro", mapOf()))
+        Log.i(TAG, "🧠 PENSANDO... [Inicio flujo normal, origen: $origen]")
+        BusEventos.publicar(Evento("avatar.expresar", "cerebro", mapOf("emocion" to "think")))
 
         textoParaLLM = texto
+        esResumenEnCurso = false
         pendienteContexto = true
         recuerdosRecuperados = ""
-        ocupado = true
         ultimoRequestId = UUID.randomUUID().toString()
+        origenUltimaInteraccion = origen // Guardar el origen para la respuesta final
 
         BusEventos.publicar(Evento("memoria.buscar_contexto", "cerebro", mapOf(
             "texto" to texto, "sesion_id" to sesionId, "request_id" to ultimoRequestId
@@ -151,7 +173,7 @@ class Cerebro : BusEventos.Suscriptor {
 
         val mensajes = mutableListOf<Map<String, String>>()
         val fecha = SimpleDateFormat("EEEE d 'de' MMMM 'de' yyyy", Locale("es", "ES")).format(Date())
-        val contextoInfo = "[INFO_SISTEMA: Hoy es $fecha. ${if(recuerdosRecuperados.isNotBlank()) "| Recuerdos: $recuerdosRecuperados" else ""}]"
+        val contextoInfo = "[SISTEMA: Hoy es $fecha. ${if(recuerdosRecuperados.isNotBlank()) "| Recuerdos: $recuerdosRecuperados" else ""}]"
 
         mensajes.add(mapOf("role" to "user", "content" to contextoInfo))
 
@@ -163,35 +185,12 @@ class Cerebro : BusEventos.Suscriptor {
 
         mensajes.add(mapOf("role" to "user", "content" to textoParaLLM))
         
-        // 1. Obtener el catálogo de herramientas de forma segura
-        val herramientas = GestorHerramientas.obtenerCatalogo()
-
-        // 2. SOLUCIÓN AL CRASH: Auditoría de permisos proactiva
-        val permisosNecesarios = mutableSetOf<String>()
-        for (i in 0 until herramientas.length()) {
-            val hStr = herramientas.getJSONObject(i).toString().lowercase()
-            if (hStr.contains("calendar") || hStr.contains("calendario")) {
-                permisosNecesarios.add(android.Manifest.permission.READ_CALENDAR)
-                permisosNecesarios.add(android.Manifest.permission.WRITE_CALENDAR)
-            }
-            if (hStr.contains("flashlight") || hStr.contains("linterna")) {
-                permisosNecesarios.add(android.Manifest.permission.CAMERA)
-            }
-        }
-
-        if (permisosNecesarios.isNotEmpty()) {
-            Log.d(TAG, "🛡️ Verificando permisos necesarios: $permisosNecesarios")
-            BusEventos.publicar(Evento("sistema.verificar_permisos", "cerebro", mapOf(
-                "permisos" to permisosNecesarios.toTypedArray()
-            )))
-        }
-
-        // 3. MEJORA DE FLUIDEZ: Copia defensiva
         mensajesEnCurso = mensajes.toMutableList()
+        lanzarSolicitudLLM(requestId)
+    }
 
-        Log.i(TAG, "🧠 Enviando a LLM ($requestId) con ${herramientas.length()} herramientas.")
-
-        // 4. Lanzar la petición formal al LLM
+    private fun lanzarSolicitudLLM(requestId: String?) {
+        val herramientas = GestorHerramientas.obtenerCatalogo()
         BusEventos.publicar(Evento("llm.solicitar", "cerebro", mapOf(
             "messages" to mensajesEnCurso,
             "herramientas" to herramientas,
@@ -200,24 +199,47 @@ class Cerebro : BusEventos.Suscriptor {
         )))
     }
 
+    /**
+     * Guarda el mensaje del asistente que contiene las tool_calls en el historial en curso.
+     */
+    private fun procesarRespuestaHerramientaLLM(evento: Evento) {
+        val requestId = evento.datos["request_id"] as? String
+        if (requestId != ultimoRequestId) return
+
+        val messageStr = evento.datos["message"] as? String ?: return
+        val messageJson = JSONObject(messageStr)
+        
+        val role = messageJson.optString("role", "assistant")
+        val toolCalls = messageJson.optJSONArray("tool_calls")?.toString()
+
+        mensajesEnCurso.add(mapOf(
+            "role" to role,
+            "content" to messageJson.optString("content", ""),
+            "tool_calls" to (toolCalls ?: "[]")
+        ))
+    }
+
     private fun procesarResultadoHerramienta(evento: Evento) {
         val requestId = evento.datos["request_id"] as? String
         if (requestId != ultimoRequestId) return
 
         val nombre = evento.datos["nombre_herramienta"] as? String
         val resultado = evento.datos["resultado"] as? String ?: ""
+        val callId = evento.datos["tool_call_id"] as? String
+        val imageBase64 = evento.datos["image_base64"] as? String
 
-        Log.i(TAG, "🧠 PENSANDO... [Resultado Tool '$nombre': $resultado]")
+        Log.i(TAG, "🧠 Resultado Tool '$nombre': $resultado. Reenviando a LLM.")
 
-        mensajesEnCurso.add(mapOf(
-            "role" to "user",
-            "content" to "[RESULTADO_HERRAMIENTA '$nombre': $resultado]"
-        ))
+        val toolMap = mutableMapOf("role" to "tool", "content" to resultado)
+        if (callId != null) toolMap["tool_call_id"] = callId
+        
+        mensajesEnCurso.add(toolMap)
 
         BusEventos.publicar(Evento("llm.solicitar", "cerebro", mapOf(
             "messages" to mensajesEnCurso,
             "usuario" to usuarioActivo,
-            "request_id" to requestId
+            "request_id" to requestId,
+            "image_base64" to imageBase64
         )))
     }
 
@@ -227,20 +249,31 @@ class Cerebro : BusEventos.Suscriptor {
 
         val respuesta = (evento.datos["respuesta"] as? String) ?: return
         val emocion = (evento.datos["emocion"] as? String) ?: "neutral"
+        val fechaIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault()).format(Date())
+
+        if (esResumenEnCurso) {
+            Log.i(TAG, "💾 Guardando resumen como recuerdo semántico.")
+            BusEventos.publicar(Evento("memoria.vectorizar", "cerebro", mapOf(
+                "texto" to respuesta,
+                "metadata" to mapOf("tipo" to "resumen", "fecha" to fechaIso)
+            )))
+            limpiarEstadoRequest()
+            return
+        }
 
         if (!modoDescanso) {
             BusEventos.publicar(Evento("avatar.expresar", "cerebro", mapOf("emocion" to emocion)))
         }
         
-        val fechaIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault()).format(Date())
         BusEventos.publicar(Evento("memoria.guardar_mensaje", "cerebro", mapOf(
             "usuario" to "Llar", "mensaje" to respuesta, "sesion_id" to sesionId, "fecha" to fechaIso
         )))
 
-        responder(respuesta)
+        // Responder según el canal de origen de la última interacción
+        responder(respuesta, origenUltimaInteraccion)
         
-        ocupado = false
-        ultimoRequestId = null
+        limpiarEstadoRequest()
+        
         contadorInteracciones++
         if (contadorInteracciones >= MAX_INTERACCIONES_ANTES_COMPACTAR) {
             contadorInteracciones = 0
@@ -249,18 +282,43 @@ class Cerebro : BusEventos.Suscriptor {
     }
 
     private fun solicitarCompactacion() {
-        if (ocupado) return
-        Log.i(TAG, "Compactando...")
+        if (!ocupado.compareAndSet(false, true)) return
+        Log.i(TAG, "📉 Iniciando compactación automática del historial...")
         BusEventos.publicar(Evento("avatar.expresar", "cerebro", mapOf("emocion" to "think")))
-        ocupado = true
+        
         val requestId = UUID.randomUUID().toString()
         ultimoRequestId = requestId
-        val msg = listOf(mapOf("role" to "user", "content" to "Resume nuestra charla en 3 frases. Solo el resumen."))
-        BusEventos.publicar(Evento("llm.solicitar", "cerebro", mapOf("messages" to msg, "usuario" to usuarioActivo, "es_resumen" to true, "request_id" to requestId)))
+        esResumenEnCurso = true
+        origenUltimaInteraccion = "cerebro" // La compactación es interna
+        
+        val msg = listOf(mapOf("role" to "user", "content" to "Resume nuestra charla reciente en 3 frases clave. Solo el resumen."))
+        BusEventos.publicar(Evento("llm.solicitar", "cerebro", mapOf(
+            "messages" to msg, 
+            "usuario" to usuarioActivo, 
+            "request_id" to requestId
+        )))
     }
 
-    private fun responder(mensaje: String) {
-        BusEventos.publicar(Evento("voz.hablar", "cerebro", mapOf("texto" to mensaje)))
+    private fun limpiarEstadoRequest() {
+        ocupado.set(false)
+        ultimoRequestId = null
+        esResumenEnCurso = false
+        mensajesEnCurso.clear()
+        origenUltimaInteraccion = "voz" // Resetear al valor por defecto
+    }
+
+    private fun responder(mensaje: String, origenRespuesta: String) {
+        when (origenRespuesta) {
+            "telegram_sentido" -> {
+                BusEventos.publicar(Evento("telegram.enviar_mensaje", "cerebro", mapOf("mensaje" to mensaje)))
+                Log.i(TAG, "🗣️ Mensaje enviado a Telegram: '$mensaje'")
+            }
+            // Si no es Telegram, o es un comando de voz, siempre responde por voz
+            else -> {
+                BusEventos.publicar(Evento("voz.hablar", "cerebro", mapOf("texto" to mensaje)))
+                Log.i(TAG, "🗣️ Mensaje hablado por Llar: '$mensaje'")
+            }
+        }
     }
 
     private fun procesarRespuestaMemoria(evento: Evento) {
@@ -272,8 +330,10 @@ class Cerebro : BusEventos.Suscriptor {
 
     private fun procesarListaActualizada(evento: Evento) {
         val items = (evento.datos["items"] as? List<*>)
-        if (evento.origen != "cerebro") {
-            responder(if (items.isNullOrEmpty()) "La lista está vacía." else "En la lista tienes: ${items.joinToString(", ")}.")
+        // Solo responder si el evento NO viene del propio cerebro y hay items.
+        // Si el LLM pide la lista, responderá con una tool.resultado.
+        if (evento.origen != "cerebro" && items != null && items.isNotEmpty()) {
+            responder(if (items.isNullOrEmpty()) "La lista está vacía." else "En la lista tienes: ${items.joinToString(", ")}.", "cerebro")
         }
     }
 

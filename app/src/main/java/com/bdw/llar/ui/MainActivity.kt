@@ -12,11 +12,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -33,91 +30,57 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.bdw.llar.core.BusEventos
-import com.bdw.llar.core.Cerebro
 import com.bdw.llar.core.LlarForegroundService
-import com.bdw.llar.core.Memoria
-import com.bdw.llar.core.MemoriaSemantica
-import com.bdw.llar.efectores.Avatar
-import com.bdw.llar.efectores.LLMRemoto
-import com.bdw.llar.efectores.Voz
-import com.bdw.llar.efectores.CalendarioAndroid
-import com.bdw.llar.efectores.DispositivoAndroid
+import com.bdw.llar.core.GestorModulos
 import com.bdw.llar.modelo.Evento
-import com.bdw.llar.sentidos.Oido
-import com.bdw.llar.sentidos.WakeWordDetector
 import android.util.Log
+import kotlinx.coroutines.launch
 import kotlin.random.Random
 
 class MainActivity : ComponentActivity() {
 
-    private var wakeWordDetector: WakeWordDetector? = null
-    private var oido: Oido? = null
-    private var cerebro: Cerebro? = null
-    private var memoria: Memoria? = null
-    private var memoriaSemantica: MemoriaSemantica? = null
-    private var llmRemoto: LLMRemoto? = null
-    private var avatar: Avatar? = null
-    private var voz: Voz? = null
-    private var calendarioAndroid: CalendarioAndroid? = null
-    private var dispositivoAndroid: DispositivoAndroid? = null
+    private var gestor: GestorModulos? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val permisosEsenciales = mutableListOf(
+        val esenciales = listOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.READ_CALENDAR,
-            Manifest.permission.WRITE_CALENDAR,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.CAMERA // Necesario para la linterna
-        )
+            Manifest.permission.CAMERA
+        ).all { permissions[it] == true }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permisosEsenciales.add(Manifest.permission.BLUETOOTH_SCAN)
-            permisosEsenciales.add(Manifest.permission.BLUETOOTH_CONNECT)
-        }
-
-        val esencialesConcedidos = permisosEsenciales.all { permissions[it] == true }
-
-        if (esencialesConcedidos) {
+        if (esenciales) {
             iniciarServicio()
-            iniciarModulos()
+            gestor?.iniciarTodo(this)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        gestor = GestorModulos(this)
 
         setContent {
             LlarTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFF0A0A0A)
-                ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF0A0A0A)) {
                     LlarScreen(
-                        onAvatarContainerReady = { container ->
-                            if (avatar == null) {
-                                avatar = Avatar(this@MainActivity, container)
-                            }
-                        },
+                        onAvatarContainerReady = { container -> gestor?.iniciarAvatar(container) },
                         onMicClick = {
                             BusEventos.publicar(Evento("oido.activar_modo_escucha", "ui", mapOf("duracion" to 7)))
                         },
                         onUserChange = { nuevoUsuario ->
-                            BusEventos.publicar(Evento("memoria.guardar", "ui", mapOf("clave" to "usuario_activo", "valor" to nuevoUsuario)))
-                            BusEventos.publicar(Evento("memoria.guardar", "ui", mapOf("clave" to "nombre_usuario", "valor" to nuevoUsuario)))
                             BusEventos.publicar(Evento("usuario.cambiado", "ui", mapOf("nuevo_usuario" to nuevoUsuario)))
-                            BusEventos.publicar(Evento("voz.hablar", "ui", mapOf("texto" to "Hola $nuevoUsuario.")))
                         },
                         onCompactClick = {
                             BusEventos.publicar(Evento("memoria.compactar", "ui"))
+                        },
+                        onCameraClick = {
+                            BusEventos.publicar(Evento("vision.capturar_foto", "ui"))
                         }
                     )
                 }
             }
         }
-
         solicitarPermisos()
     }
 
@@ -126,61 +89,23 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.READ_CALENDAR,
             Manifest.permission.WRITE_CALENDAR,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.CAMERA
+            Manifest.permission.CAMERA,
+            Manifest.permission.ACCESS_FINE_LOCATION
         )
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
             permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
         }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-
         requestPermissionLauncher.launch(permissions.toTypedArray())
     }
 
-    private fun iniciarModulos() {
-        try {
-            if (memoria == null) memoria = Memoria(this)
-            if (memoriaSemantica == null) memoriaSemantica = MemoriaSemantica()
-            if (cerebro == null) cerebro = Cerebro()
-            if (llmRemoto == null) llmRemoto = LLMRemoto()
-            if (voz == null) voz = Voz(this)
-            if (calendarioAndroid == null) calendarioAndroid = CalendarioAndroid(this)
-            if (dispositivoAndroid == null) dispositivoAndroid = DispositivoAndroid(this)
-            if (oido == null) oido = Oido(this)
-            if (wakeWordDetector == null) {
-                wakeWordDetector = WakeWordDetector(this)
-                wakeWordDetector?.iniciarEscucha()
-            }
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Error al iniciar módulos: ${e.message}")
-        }
-    }
-
     private fun iniciarServicio() {
-        try {
-            val intent = Intent(this, LlarForegroundService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Error al iniciar servicio: ${e.message}")
-        }
+        val intent = Intent(this, LlarForegroundService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
     }
 
     override fun onDestroy() {
-        wakeWordDetector?.shutdown()
-        oido?.shutdown()
-        avatar?.shutdown()
-        voz?.shutdown()
-        memoriaSemantica?.shutdown()
+        gestor?.detenerTodo()
         super.onDestroy()
     }
 }
@@ -191,25 +116,23 @@ fun LlarScreen(
     onAvatarContainerReady: (FrameLayout) -> Unit,
     onMicClick: () -> Unit,
     onUserChange: (String) -> Unit,
-    onCompactClick: () -> Unit
+    onCompactClick: () -> Unit,
+    onCameraClick: () -> Unit
 ) {
     var ultimoEvento by remember { mutableStateOf("LISTO") }
     var itemsLista by remember { mutableStateOf<List<String>>(emptyList()) }
     var expandedUserMenu by remember { mutableStateOf(false) }
     var amplitudVoz by remember { mutableFloatStateOf(0f) }
     
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
     val view = LocalView.current
     val usuarios = listOf("Pedro", "Rebeca", "Sergio")
     var usuarioSeleccionado by remember { mutableStateOf(usuarios[0]) }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "fuego")
-    val fireAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 0.7f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ), label = "alpha_fuego"
+    val fireAlpha by rememberInfiniteTransition().animateFloat(
+        initialValue = 0.3f, targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(tween(2500, easing = FastOutSlowInEasing), RepeatMode.Reverse)
     )
 
     val fireGradient = Brush.verticalGradient(
@@ -221,15 +144,9 @@ fun LlarScreen(
         val suscriptor = object : BusEventos.Suscriptor {
             override fun alRecibirEvento(evento: Evento) {
                 when (evento.tipo) {
-                    "lista.compra_actualizada" -> {
-                        itemsLista = (evento.datos["items"] as? List<*>)?.map { it.toString() } ?: emptyList()
-                    }
-                    "oido.amplitud" -> {
-                        amplitudVoz = (evento.datos["valor"] as? Float) ?: 0f
-                    }
-                    else -> {
-                        ultimoEvento = evento.tipo.substringAfterLast(".").uppercase()
-                    }
+                    "lista.compra_actualizada" -> itemsLista = (evento.datos["items"] as? List<*>)?.map { it.toString() } ?: emptyList()
+                    "oido.amplitud" -> amplitudVoz = (evento.datos["valor"] as? Float) ?: 0f
+                    else -> ultimoEvento = evento.tipo.substringAfterLast(".").uppercase()
                 }
             }
         }
@@ -238,85 +155,101 @@ fun LlarScreen(
         onDispose { BusEventos.desuscribirTodo(suscriptor) }
     }
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                navigationIcon = {
-                    Row(modifier = Modifier.padding(start = 8.dp)) {
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(drawerContainerColor = Color(0xFF0F0F0F), drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("HERRAMIENTAS", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = Color(0xFFFF4500))
+                    IconButton(onClick = { scope.launch { drawerState.close() } }) {
+                        Icon(Icons.Default.Close, contentDescription = "Cerrar menú", tint = Color(0xFFFF8C00))
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.1f))
+                NavigationDrawerItem(
+                    label = { Text("Analizar Entorno (Cámara)") }, selected = false,
+                    onClick = { 
+                        scope.launch { drawerState.close() }
+                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        onCameraClick() 
+                    },
+                    icon = { Icon(Icons.Default.PhotoCamera, contentDescription = null) },
+                    colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent, unselectedTextColor = Color.White, unselectedIconColor = Color(0xFFFF8C00))
+                )
+                NavigationDrawerItem(
+                    label = { Text("Optimizar Memoria") }, selected = false,
+                    onClick = { 
+                        scope.launch { drawerState.close() }
+                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        onCompactClick() 
+                    },
+                    icon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) },
+                    colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = Color.Transparent, unselectedTextColor = Color.White, unselectedIconColor = Color(0xFFFF8C00))
+                )
+            }
+        }
+    ) {
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = { view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Filled.Menu, contentDescription = "Menú", tint = Color(0xFFFF8C00))
+                        }
+                    },
+                    title = {
+                        Text("LLAR", style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold, letterSpacing = 8.sp), color = Color(0xFFFF4500))
+                    },
+                    actions = {
                         IconButton(onClick = { 
                             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                            onMicClick() 
+                            BusEventos.publicar(Evento("lista.consultar", "ui"))
+                            scope.launch { drawerState.open() } // Abrir panel lateral para ver lista
                         }) {
-                            Icon(Icons.Filled.Mic, contentDescription = "Hablar", tint = Color(0xFFFF8C00))
-                        }
-                    }
-                },
-                title = {
-                    Text(
-                        "LLAR", 
-                        style = MaterialTheme.typography.headlineMedium.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 8.sp
-                        ),
-                        color = Color(0xFFFF4500)
-                    )
-                },
-                actions = {
-                    Row(modifier = Modifier.padding(end = 8.dp)) {
-                        IconButton(onClick = {
-                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                            onCompactClick()
-                        }) {
-                            Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "Compactar", tint = Color(0xFFFF8C00))
+                            BadgedBox(badge = { if(itemsLista.isNotEmpty()) Badge { Text(itemsLista.size.toString()) } }) {
+                                Icon(Icons.Default.ShoppingCart, contentDescription = "Lista", tint = Color(0xFFFF8C00))
+                            }
                         }
                         Box {
-                            IconButton(onClick = { expandedUserMenu = true }) {
-                                Icon(Icons.Default.Person, contentDescription = "Usuario", tint = Color(0xFFFF8C00))
-                            }
+                            IconButton(onClick = { expandedUserMenu = true }) { Icon(Icons.Default.Person, contentDescription = "Usuario", tint = Color(0xFFFF8C00)) }
                             DropdownMenu(expanded = expandedUserMenu, onDismissRequest = { expandedUserMenu = false }) {
                                 usuarios.forEach { user ->
-                                    DropdownMenuItem(
-                                        text = { Text(user) },
-                                        onClick = {
-                                            usuarioSeleccionado = user
-                                            onUserChange(user)
-                                            expandedUserMenu = false
-                                        }
-                                    )
+                                    DropdownMenuItem(text = { Text(user) }, onClick = { usuarioSeleccionado = user; onUserChange(user); expandedUserMenu = false })
                                 }
                             }
                         }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color(0xFF050505))
+                )
+            },
+            floatingActionButton = {
+                FloatingActionButton(
+                    onClick = { view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); onMicClick() },
+                    containerColor = Color(0xFFFF4500), contentColor = Color.White, shape = CircleShape
+                ) { Icon(Icons.Filled.Mic, contentDescription = "Hablar", modifier = Modifier.size(32.dp)) }
+            },
+            floatingActionButtonPosition = FabPosition.Center
+        ) { padding ->
+            Box(modifier = Modifier.fillMaxSize().padding(padding).background(Color(0xFF0A0A0A))) {
+                Box(modifier = Modifier.fillMaxWidth().height(200.dp).background(fireGradient))
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Column(modifier = Modifier.fillMaxWidth().weight(1f).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        Text("CONEXIÓN: $usuarioSeleccionado", style = MaterialTheme.typography.labelMedium, color = Color(0xFFFF8C00).copy(alpha = 0.6f))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        VisualizadorEspectro(amplitud = amplitudVoz)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Surface(color = Color(0xFFFF4500).copy(alpha = 0.05f), shape = RoundedCornerShape(20.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF4500).copy(alpha = 0.15f))) {
+                            Text(ultimoEvento, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp), color = Color(0xFFFF4500), letterSpacing = 2.sp)
+                        }
                     }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color(0xFF050505))
-            )
-        }
-    ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding).background(Color(0xFF0A0A0A))) {
-            Box(modifier = Modifier.fillMaxWidth().height(200.dp).background(fireGradient))
-            Column(modifier = Modifier.fillMaxSize()) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().weight(1f).padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Text("CONEXIÓN: $usuarioSeleccionado", style = MaterialTheme.typography.labelMedium, color = Color(0xFFFF8C00).copy(alpha = 0.6f))
-                    Spacer(modifier = Modifier.height(16.dp))
-                    VisualizadorEspectro(amplitud = amplitudVoz)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Surface(
-                        color = Color(0xFFFF4500).copy(alpha = 0.05f),
-                        shape = RoundedCornerShape(20.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF4500).copy(alpha = 0.15f))
-                    ) {
-                        Text(ultimoEvento, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp), color = Color(0xFFFF4500), letterSpacing = 2.sp)
+                    Box(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.6f).clip(RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp)).background(Color.Black.copy(alpha = 0.25f))) {
+                        AndroidView(factory = { ctx -> FrameLayout(ctx).apply { post { onAvatarContainerReady(this) } } }, modifier = Modifier.fillMaxSize())
                     }
-                }
-                Box(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.5f).clip(RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp)).background(Color.Black.copy(alpha = 0.25f))) {
-                    AndroidView(
-                        factory = { ctx -> FrameLayout(ctx).apply { post { onAvatarContainerReady(this) } } },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    Spacer(modifier = Modifier.height(72.dp))
                 }
             }
         }
@@ -336,6 +269,4 @@ fun VisualizadorEspectro(amplitud: Float) {
 }
 
 @Composable
-fun LlarTheme(content: @Composable () -> Unit) {
-    MaterialTheme(typography = Typography(), content = content)
-}
+fun LlarTheme(content: @Composable () -> Unit) { MaterialTheme(typography = Typography(), content = content) }
